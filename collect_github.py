@@ -57,8 +57,16 @@ BLOCKED_COMPANIES = {
     "fog data science",
 }
 
+DEALBREAKER_KEYWORDS = [
+    "raytheon", "boeing", "northrop grumman", "lockheed",
+    "gdit", "leidos", "caci", "booz allen",
+]
+
 def is_blocked_company(company_name):
-    return company_name.strip().lower() in BLOCKED_COMPANIES
+    lowered = company_name.strip().lower()
+    if lowered in BLOCKED_COMPANIES:
+        return True
+    return any(keyword in lowered for keyword in DEALBREAKER_KEYWORDS)
 
 def classify_job(job):
     prompt = CLASSIFICATION_PROMPT.format(
@@ -111,7 +119,12 @@ def add_new_jobs(client, jobs, existing_ids, existing_canonical_links):
 
         if is_blocked_company(job["company"]):
             print(f"  Blocked company, skipping classification: {job['company']}")
-            classification = {"relevant": False, "score": 1, "reason": "blocked company (ICE/surveillance)"}
+            lowered = job["company"].strip().lower()
+            if lowered in BLOCKED_COMPANIES:
+                reason = "blocked company (ICE/surveillance)"
+            else:
+                reason = "defense contractor / government sector (dealbreaker)"
+            classification = {"relevant": False, "score": 1, "reason": reason}
         else:
             print(f"  Classifying: {job['company']} — {job['title']}")
             classification = classify_job(job)
