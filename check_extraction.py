@@ -19,6 +19,22 @@ CLOSED_PATTERNS = [
     "position is closed",
 ]
 
+# 403/429/503 usually mean bot-detection kicked in, not that the posting is
+# actually gone. Bucket these separately so they don't get conflated with
+# real dead links and silently dropped.
+BLOCKED_STATUS_CODES = {403, 429, 503}
+
+# A fuller header set clears some of these blocks outright (SmartRecruiters
+# in particular seems to reject bare `requests.get` UAs).
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 def get_all_jobs():
     result = get_client().table("job_postings").select("id, company, link").execute()
     return result.data
@@ -27,7 +43,7 @@ def fetch_and_extract(url, timeout=10):
     """Fetches a URL and extracts visible text, stripped of script/nav/footer noise.
     Returns (status_code, text) — (None, None) if the request itself fails."""
     try:
-        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=timeout, headers=DEFAULT_HEADERS)
     except requests.RequestException:
         return None, None
 
@@ -38,8 +54,13 @@ def fetch_and_extract(url, timeout=10):
     return resp.status_code, text
 
 def classify_extraction(status_code, text):
-    """Buckets an extraction as 'good', 'thin' (likely needs JS), 'closed', or 'dead'."""
-    if status_code is None or status_code != 200:
+    """Buckets an extraction as 'good', 'thin' (likely needs JS), 'closed',
+    'blocked' (bot-detection, not actually dead), or 'dead'."""
+    if status_code is None:
+        return "dead"
+    if status_code in BLOCKED_STATUS_CODES:
+        return "blocked"
+    if status_code != 200:
         return "dead"
 
     lowered = text.lower()
@@ -56,7 +77,7 @@ def run_diagnostic():
     print(f"Checking extraction on {len(jobs)} postings...")
 
     cache = {}
-    results = {"good": 0, "thin": 0, "closed": 0, "dead": 0}
+    results = {"good": 0, "thin": 0, "closed": 0, "blocked": 0, "dead": 0}
 
     for i, job in enumerate(jobs, 1):
         status_code, text = fetch_and_extract(job["link"])
