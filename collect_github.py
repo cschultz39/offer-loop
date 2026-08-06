@@ -12,9 +12,43 @@ load_dotenv()
 from sources import newgrad2027
 from sources import speedyapply
 from db_tools import get_client
+from fetch_job_text import JobTextFetcher
 
 # --------------- relevance score via claude ----------------
 anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+MAX_DESCRIPTION_CHARS = 3000  # keep token cost bounded
+
+# Same set used in check_extraction.py — kept identical so "closed" means the
+# same thing everywhere in the pipeline, not a slightly different heuristic
+# per script.
+CLOSED_POSTING_PATTERNS = [
+    "no longer accepting applications",
+    "this position has been filled",
+    "posting has expired",
+    "job is no longer available",
+    "position is closed",
+]
+
+
+def posting_status(status_code, text):
+    """'dead' (fetch failed / no usable text), 'closed' (fetched fine, but
+    the page itself says the posting is closed), or 'open'. Dead and closed
+    postings should never reach classify_job or the database."""
+    if status_code is None or not text:
+        return "dead"
+    lowered = text.lower()
+    if any(pattern in lowered for pattern in CLOSED_POSTING_PATTERNS):
+        return "closed"
+    return "open"
+
+
+def build_description_block(text):
+    if not text:
+        return ""
+    snippet = text[:MAX_DESCRIPTION_CHARS]
+    return f"\nJob description excerpt:\n{snippet}\n"
+
 
 CLASSIFICATION_PROMPT = """You are helping a computer science student graduating May 2027 evaluate new-grad job postings for Forward Deployed Engineer (FDE) or Software Engineer (SWE) roles.
 
@@ -22,21 +56,27 @@ Given this posting:
 Company: {company}
 Title: {title}
 Location: {location}
+{description_block}
 
 The candidate's preferences:
 - Location, in order of preference: (1) Chicago, (2) Chicagoland Area, (3) Big Cities in the Midwest, (4) Portland/Washington, (5) anywhere in the USA as a lower-priority fallback
 - No preference on company type/size (big tech, startup, and quant/finance are all fine)
-- Hard dealbreakers: defense contractors and government-sector roles (e.g. Raytheon, Boeing, Northrop Grumman, Lockheed, GDIT, Leidos, CACI, Booz Allen, or any role requiring a security clearance) — these should always be marked not relevant regardless of anything else about the posting
+- Strongly prefer roles that use Python, involve building/working with AI agents, or otherwise involve hands-on AI/LLM usage — score higher when the title or description clearly indicates this
+
+Graduation-year matching (read from the title or description text — don't assume if it isn't stated):
+- If the posting is explicitly labeled "New Grad 2027" (or equivalent, e.g. "Class of 2027"), or the description states a graduation window overlapping December 2026 through June 2027 (e.g. "on track to graduate between December 2026 and June 2027"), treat this as a strong positive signal
+- If the posting is explicitly labeled "New Grad 2026" (or equivalent, e.g. "Class of 2026"), set relevant: false and score: 1 — wrong class year, not a fit regardless of anything else about the role
+- If no graduation year is stated anywhere in the posting, don't penalize it for that absence — evaluate on the other criteria alone
 
 Respond with ONLY a JSON object, no other text, in this exact format:
 {{"relevant": true or false, "score": 1-10, "reason": "one short sentence"}}
 
 Scoring guidance:
-- Set relevant: false and score: 1 for anything matching a dealbreaker above, regardless of how good the role otherwise looks
-- For non-dealbreaker postings, score higher for roles that closely match FDE or general SWE work AND match a higher-priority location tier
-- A strong SWE/FDE role in a lower-priority location should still score reasonably (5-7), not be penalized as heavily as an actual dealbreaker
+- Set relevant: false and score: 1 for an explicit "New Grad 2026" label, regardless of how good the role otherwise looks
+- For everything else, score higher for roles that closely match FDE or general SWE work AND match a higher-priority location tier AND match the Python/AI-agent/AI-usage or 2027-grad-year signals above
+- A strong SWE/FDE role in a lower-priority location should still score reasonably (5-7), not be penalized as heavily as a wrong-class-year mismatch
 - Score lower (5-7) but still relevant: true for adjacent roles or acceptable-but-not-ideal locations
-- Only use relevant: false for dealbreaker matches or roles that clearly aren't software engineering work despite matching our keyword filter"""
+- Only use relevant: false for an explicit "New Grad 2026" label or roles that clearly aren't software engineering work despite matching our keyword filter"""
 
 BLOCKED_COMPANIES = {
     "palantir",
@@ -68,9 +108,12 @@ def is_blocked_company(company_name):
         return True
     return any(keyword in lowered for keyword in DEALBREAKER_KEYWORDS)
 
-def classify_job(job):
+def classify_job(job, description=None):
     prompt = CLASSIFICATION_PROMPT.format(
-        company=job["company"], title=job["title"], location=job["location"]
+        company=job["company"],
+        title=job["title"],
+        location=job["location"],
+        description_block=build_description_block(description),
     )
     fallback = {"relevant": True, "score": 5, "reason": "classification failed, defaulted"}
 
@@ -110,7 +153,7 @@ def get_existing_ids(client):
     canonical_links = {canonicalize_link(row["link"]) for row in result.data if row.get("link")}
     return ids, canonical_links
 
-def add_new_jobs(client, jobs, existing_ids, existing_canonical_links):
+def add_new_jobs(client, jobs, existing_ids, existing_canonical_links, fetcher):
     new_count = 0
     for job in jobs:
         canonical = canonicalize_link(job["link"])
@@ -126,8 +169,14 @@ def add_new_jobs(client, jobs, existing_ids, existing_canonical_links):
                 reason = "defense contractor / government sector (dealbreaker)"
             classification = {"relevant": False, "score": 1, "reason": reason}
         else:
+            print(f"  Fetching posting text: {job['company']} — {job['title']}")
+            status_code, description = fetcher.fetch(job["link"])
+            status = posting_status(status_code, description)
+            if status in ("dead", "closed"):
+                print(f"  Skipping ({status}), not classifying or saving: {job['company']} — {job['title']}")
+                continue
             print(f"  Classifying: {job['company']} — {job['title']}")
-            classification = classify_job(job)
+            classification = classify_job(job, description=description)
 
         client.table("job_postings").insert({
             "id": job["id"],
@@ -175,5 +224,6 @@ if __name__ == "__main__":
     print(f"{len(existing_ids)} already in the sheet")
 
     print("Adding new postings...")
-    added = add_new_jobs(client, jobs, existing_ids, existing_canonical_links)
+    with JobTextFetcher() as fetcher:
+        added = add_new_jobs(client, jobs, existing_ids, existing_canonical_links, fetcher)
     print(f"\nAdded {added} new posting(s) to the sheet.")

@@ -1,29 +1,12 @@
-# debug_workday_session.py
-import requests
-from ats_apis import _parse_workday_url, DEFAULT_HEADERS
+from fetch_job_text import JobTextFetcher
+from collect_github import posting_status
 
-def debug_session_flow(url):
-    print(f"\n--- {url}")
-    identifiers = _parse_workday_url(url)
-    base = f"https://{identifiers['tenant']}.{identifiers['wd_server']}.myworkdayjobs.com"
-    human_url = f"{base}/en-US/{identifiers['site']}/job/{identifiers['external_path']}"
-    api_url = f"{base}/wday/cxs/{identifiers['tenant']}/{identifiers['site']}/job/{identifiers['external_path']}"
+known_closed_or_dead = [
+    "https://www.digicert.com/careers/?gh_jid=8637536002",  # Greenhouse API returned 404
+    "https://bcbst.wd1.myworkdayjobs.com/en-US/external/job/USA-TN-Chattanooga-Remote/Associate-Software-Engineer-II_R-50763",  # Workday API returned 404
+]
 
-    session = requests.Session()
-    session.headers.update(DEFAULT_HEADERS)
-
-    warmup = session.get(human_url, timeout=10)
-    print("warmup status:", warmup.status_code)
-    print("cookies received:", dict(session.cookies))
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Accept-Language": "en-US",
-        "Referer": human_url,
-    }
-    resp = session.get(api_url, headers=headers, timeout=10)
-    print("api status:", resp.status_code)
-    print("api body[:300]:", resp.text[:300])
-
-debug_session_flow("https://nvidia.wd5.myworkdayjobs.com/en-US/nvidiaexternalcareersite/job/US-CA-Santa-Clara/System-Software-Engineer--Dynamo-Triton-Inference-Server---New-College-Grad-2026_JR2020767")
+with JobTextFetcher() as fetcher:
+    for url in known_closed_or_dead:
+        status_code, text = fetcher.fetch(url)
+        print(url[:70], "->", posting_status(status_code, text))

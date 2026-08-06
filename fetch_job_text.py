@@ -3,13 +3,23 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+from ats_apis import fetch_via_ats_api
 
-JS_RENDERED_DOMAINS = ["ashbyhq.com", "myworkdayjobs.com", "metacareers.com"]
+JS_RENDERED_DOMAINS = [
+    "ashbyhq.com",
+    "myworkdayjobs.com",
+    "metacareers.com",
+    "workable.com",
+    "icims.com",
+    "dayforcehcm.com",
+]
 
 DEAD_LINK_PATTERNS = [
     "page you are looking for doesn't exist",
     "page is no longer available",
 ]
+
+GH_JID_PATTERN = "gh_jid="
 
 def is_dead_link_text(text):
     lowered = text.lower()
@@ -24,7 +34,11 @@ def get_domain(url):
 
 def needs_playwright(url):
     domain = get_domain(url)
-    return any(js_domain in domain for js_domain in JS_RENDERED_DOMAINS)
+    if any(js_domain in domain for js_domain in JS_RENDERED_DOMAINS):
+        return True
+    if GH_JID_PATTERN in url:
+        return True
+    return False
 
 def extract_with_requests(url, timeout=10):
     try:
@@ -59,6 +73,12 @@ class JobTextFetcher:
         self._playwright.stop()
 
     def fetch(self, url):
+        # Try the direct ATS API first — no browser, more reliable than
+        # rendering/iframe-hunting for Greenhouse and Workday specifically.
+        api_text = fetch_via_ats_api(url)
+        if api_text:
+            return 200, api_text
+
         if needs_playwright(url):
             return self._extract_with_playwright(url)
         return extract_with_requests(url)
@@ -69,20 +89,44 @@ class JobTextFetcher:
             try:
                 page.goto(url, timeout=timeout, wait_until="networkidle")
             except Exception:
-                # some pages (e.g. Workday) never go fully idle — fall back to
-                # waiting for DOM content plus a fixed pause for JS to populate it
                 page.goto(url, timeout=timeout, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000)
-            html = page.content()
+
+            if GH_JID_PATTERN in url:
+                html, is_dead = self._extract_greenhouse_iframe(page)
+            else:
+                html, is_dead = page.content(), False
+
             page.close()
         except Exception as e:
             print(f"  Playwright extraction failed for {url}: {e}")
             return None, None
 
+        if is_dead:
+            return 200, None  # embed itself signaled an error — treat as dead link
+
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = " ".join(soup.get_text(separator=" ").split())
+
         if text and is_dead_link_text(text):
-            return 200, None  # treat as no usable content, not a real description
+            return 200, None
+
         return 200, text
+
+    def _extract_greenhouse_iframe(self, page):
+        """Greenhouse embeds (gh_jid links) load actual job content in a child
+        iframe, not the parent page — page.content() alone only captures the
+        site's shell. This finds that frame and pulls its content directly,
+        or flags the posting dead if the embed URL itself carries an error."""
+        for frame in page.frames:
+            if "greenhouse.io" in frame.url and "job_board" in frame.url:
+                if "error=true" in frame.url:
+                    return "", True
+                try:
+                    frame.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                return frame.content(), False
+        return page.content(), False  # no matching iframe found — fall back to parent shell
