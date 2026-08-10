@@ -30,7 +30,7 @@ export default async function Home() {
       </h1>
 
       <h2
-        className="font-pixel font-semibold text-med mb-3 inline-block"
+        className="font-pixel font-semibold text-med mb-3 block"
         style={{
           background: "var(--color-not-applied)",
           color: "#fff",
