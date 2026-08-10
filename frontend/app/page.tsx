@@ -26,7 +26,7 @@ export default async function Home() {
                   boxShadow: "4px 4px 0 var(--color-applied-d)",
                 }}
       >
-        OfferLoop
+        stay in the loop!
       </h1>
 
       <h2
