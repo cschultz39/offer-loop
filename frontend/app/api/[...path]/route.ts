@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 const FASTAPI_URL = process.env.FASTAPI_URL;
 const API_SECRET = process.env.API_SECRET!;
 
-async function proxy(req: NextRequest, path: string[]) {
+async function proxy(req: NextRequest, paramsPromise: Promise<{ path: string[] }>) {
+  const { path } = await paramsPromise;
   const url = `${FASTAPI_URL}/${path.join("/")}${req.nextUrl.search}`;
 
   const init: RequestInit = {
@@ -27,12 +28,14 @@ async function proxy(req: NextRequest, path: string[]) {
   });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
-  return proxy(req, params.path);
+type RouteContext = { params: Promise<{ path: string[] }> };
+
+export async function GET(req: NextRequest, { params }: RouteContext) {
+  return proxy(req, params);
 }
-export async function POST(req: NextRequest, { params }: { params: { path: string[] } }) {
-  return proxy(req, params.path);
+export async function POST(req: NextRequest, { params }: RouteContext) {
+  return proxy(req, params);
 }
-export async function PATCH(req: NextRequest, { params }: { params: { path: string[] } }) {
-  return proxy(req, params.path);
+export async function PATCH(req: NextRequest, { params }: RouteContext) {
+  return proxy(req, params);
 }
