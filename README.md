@@ -46,21 +46,25 @@ Built as a personal tool to reduce the manual overhead of a new-grad job search 
 
 1. **Collects** active new-grad SWE postings from curated GitHub repos (currently `speedyapply/2027-SWE-College-Jobs`; `SimplifyJobs/New-Grad-Positions` is supported but disabled until it adds 2027 postings)
 2. **Filters** by title keywords (software engineer, backend, frontend, forward deployed, etc.) and active/visible status
-3. **Deduplicates** against what's already been collected (checked via `id` lookups in Supabase), so re-running never creates duplicate rows
-4. **Classifies** each new posting with the Claude API against personal preferences — location tiers, and hard-excludes for defense/government contractors and companies associated with ICE/surveillance work (both via an explicit blocklist for known companies and a prompt-based fallback for others)
-5. **Stores** everything in a Supabase Postgres database — a `job_postings` table (id, company, title, location, link, source, date posted, date scraped, status, relevance score, relevance reason) plus a `status_history` table logging every status transition as an event (job_id, old_status, new_status, timestamp)
-6. **Reports** newly found postings to Slack once a day, sorted by relevance score
-7. **Runs automatically** every day via a GitHub Actions scheduled workflow — no manual steps required
-8. **Serves a dashboard** (Next.js frontend + FastAPI backend) showing status count tiles, a weekly status-history line chart (one line per status, color-matched to its tile), and the top 10 unapplied jobs with one-click "mark applied"
+3. **Deduplicates** against what's already been collected (checked via `id` lookups and canonicalized-link comparison in Supabase, so the same posting reachable through different sources/query strings doesn't create duplicate rows)
+4. **Fetches** the full posting text for anything that isn't a name-based dealbreaker, via `fetch_job_text.py`'s `JobTextFetcher` — tries a direct ATS JSON API first (`ats_apis.py`, for Greenhouse and most Workday tenants), falls back to Playwright for JS-rendered boards (Ashby, remaining Workday, Meta Careers, Workable, iCIMS, Dayforce), and plain `requests`/BeautifulSoup otherwise. Postings that come back dead (fetch failed) or closed (page text says so) are skipped entirely — never classified, never written to the database.
+5. **Classifies** each remaining new posting with the Claude API against personal preferences — location tiers, grad-year match (2027 preferred, 2026 excluded), Python/AI-agent/LLM-usage signal, and hard-excludes for defense/government contractors and companies associated with ICE/surveillance work (checked via an explicit blocklist before the Claude call, so those postings skip both the fetch step and the API call entirely)
+6. **Stores** everything in a Supabase Postgres database — a `job_postings` table (id, company, title, location, link, source, date posted, date scraped, status, relevance score, relevance reason) plus a `status_history` table logging every status transition as an event (job_id, old_status, new_status, timestamp)
+7. **Reports** newly found postings to Slack once a day, sorted by relevance score
+8. **Runs automatically** every day via a GitHub Actions scheduled workflow — no manual steps required
+9. **Serves a dashboard** (Next.js frontend + FastAPI backend) showing status count tiles, a weekly status-history line chart (one line per status, color-matched to its tile), and the top 10 unapplied jobs with one-click "mark applied"
 
 ## File structure
 
 ```
 job-search-agent/
-├── collect_github.py          # Main collector: fetch, filter, dedup, classify, write to sheet
+├── collect_github.py          # Main collector: fetch, filter, dedup, fetch text, classify, write to sheet
+├── fetch_job_text.py           # JobTextFetcher — routes posting-page text extraction between direct ATS APIs (ats_apis.py), Playwright, and requests/BeautifulSoup
+├── ats_apis.py                  # Direct JSON API access for Greenhouse and Workday, bypassing browser rendering where the platform allows it
 ├── db_tools.py                 # Shared Supabase (Postgres) read/write logic (used by API + collector)
 ├── slack_report.py             # Formats and sends today's new postings to Slack
 ├── reclassify.py               # One-off batch re-classification of existing rows
+├── check_extraction.py         # Standalone diagnostic: buckets extraction quality (good/thin/closed/blocked/dead) across all saved postings, used to find routing gaps
 ├── agent.py                    # Claude tool-use agent: search_jobs / mark_status tools (currently unused by the active UI — see note above)
 ├── dashboard.py                # Legacy Streamlit chat UI (superseded — see note above)
 ├── sources/

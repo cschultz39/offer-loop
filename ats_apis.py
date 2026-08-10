@@ -12,7 +12,6 @@ from urllib.parse import urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
-import time
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -208,21 +207,18 @@ def fetch_workday_job(url, timeout=10):
         "Referer": human_url,
     }
 
-    for attempt in range(2):
-        try:
-            resp = session.get(api_url, headers=headers, timeout=timeout)
-        except requests.RequestException:
-            return None
-        if resp.status_code == 200:
-            html_desc = _find_str_field(resp.json(), WORKDAY_DESCRIPTION_KEYS)
-            return _html_to_text(html_desc)
-        if resp.status_code == 404:
-            return None  # genuinely closed — no point retrying
-        if resp.status_code == 403 and attempt == 0:
-            time.sleep(1.5)
-            continue
+    try:
+        resp = session.get(api_url, headers=headers, timeout=timeout)
+    except requests.RequestException:
         return None
 
+    if resp.status_code == 200:
+        html_desc = _find_str_field(resp.json(), WORKDAY_DESCRIPTION_KEYS)
+        return _html_to_text(html_desc)
+
+    # 403 here means Cloudflare bot-management, not a fixable client issue —
+    # 404 means the requisition is genuinely closed. Either way: None,
+    # falls through to Playwright as designed.
     return None
 
 
