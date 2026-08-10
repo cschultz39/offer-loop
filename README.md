@@ -79,7 +79,10 @@ job-search-agent/
 │   ├── app/
 │   │   ├── layout.tsx            # Root layout — loads Pixelify Sans + Press Start 2P fonts
 │   │   ├── page.tsx              # Main dashboard page
-│   │   └── globals.css           # Strawberry matcha color tokens, pixel-art tile/card styles
+│   │   ├── globals.css           # Strawberry matcha color tokens, pixel-art tile/card styles
+│   │   └── api/
+│   │       └── [...path]/
+│   │           └── route.ts      # Catch-all proxy: forwards browser requests to the FastAPI backend, attaching API_SECRET server-side so it's never exposed to the client
 │   ├── components/
 │   │   ├── MetricsTiles.tsx      # Status count tiles, colors sourced from lib/statusColors.ts
 │   │   ├── StatusChart.tsx       # Weekly status-history chart (Recharts), one line per status
@@ -125,10 +128,13 @@ Dealbreaker postings are currently still written to the sheet (visible, scored l
 | `SLACK_WEBHOOK_URL` | Incoming webhook for the daily Slack digest |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key (server-side only — used by the collector, Slack report, and FastAPI backend, never exposed to the frontend) |
-| `NEXT_PUBLIC_API_URL` | Base URL the frontend uses to reach the FastAPI backend |
+| `FASTAPI_URL` | Base URL the Next.js proxy (`app/api/[...path]/route.ts`) uses to reach the FastAPI backend. Server-side only — replaces the old `NEXT_PUBLIC_API_URL` |
+| `API_SECRET` | Shared secret required on every FastAPI request (checked via `verify_secret` in `api/main.py`); attached server-side by the Next.js proxy, never exposed to the browser. Same value set on both Vercel and Railway |
 | `FRONTEND_URL` | Live Vercel domain, used for CORS in `api/main.py` |
 
-Locally, the Python-side variables live in `.env`. In GitHub Actions, they're stored as repository secrets and injected as environment variables in the workflow.
+Locally, the Python-side variables live in `.env`. In GitHub Actions, they're stored as repository secrets and injected as environment variables in the workflow. The frontend's `FASTAPI_URL` and `API_SECRET` live in `frontend/.env.local` (gitignored) and must be mirrored in Vercel's project settings for production.
+
+**Note:** the browser never talks to Railway directly. `lib/api.ts` calls same-origin `/api/...` routes; `app/api/[...path]/route.ts` proxies those to FastAPI, attaching `x-api-key: API_SECRET` on the way — this keeps the secret out of client-side JS while still gating every backend endpoint.
 
 ## Running locally
 
@@ -150,8 +156,8 @@ npm run dev                   # launch the Next.js dashboard
 
 ## Deployment
 
-- **Frontend**: Next.js on Vercel. Root Directory set to `frontend`; `NEXT_PUBLIC_API_URL` points at the Railway backend URL.
-- **Backend**: FastAPI on Railway. Root Directory is the **repo root** (not `api/`) — `api/main.py` imports `db_tools.py` from the parent directory via `sys.path.append`, and the consolidated `requirements.txt` also lives at the repo root, so both need to be in the build context. Railway's start command is set explicitly (Railpack doesn't reliably auto-detect FastAPI or read `Procfile`):
+- **Frontend**: Next.js on Vercel. Root Directory set to `frontend`; `FASTAPI_URL` (server-only) points at the Railway backend URL, and `API_SECRET` (same value as Railway's) is attached to every proxied request by `app/api/[...path]/route.ts`. The browser only ever calls same-origin `/api/...` routes — never Railway directly.
+- **Backend**: FastAPI on Railway. Root Directory is the **repo root** (not `api/`) — `api/main.py` imports `db_tools.py` from the parent directory via `sys.path.append`, and the consolidated `requirements.txt` also lives at the repo root, so both need to be in the build context. Every route except `/health` requires a matching `x-api-key: API_SECRET` header (checked via `verify_secret` in `api/main.py`), guarding the deployed URL against anyone who stumbles onto it — this is a single-user tool, not multi-tenant auth. Railway's start command is set explicitly (Railpack doesn't reliably auto-detect FastAPI or read `Procfile`):
 ```
 uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ```
@@ -161,6 +167,8 @@ This requires `api/__init__.py` to exist so `api.main` resolves as a package imp
 ### Known gotchas from getting this working
 - Next.js App Router caches `fetch()` GET requests by default; the dashboard's data-fetching functions in `lib/api.ts` (`getMetrics`, `getWeeklyHistory`, `getUnappliedJobs`) use `{ cache: "no-store" }` so `router.refresh()` (called after any status-changing action, including agent-driven ones from chat) actually pulls fresh data instead of a stale cached response.
 - CORS origin matching is exact-string — a trailing slash mismatch between `FRONTEND_URL` and the browser's actual `Origin` header is enough to fail preflight on `/chat` and `/jobs/status`.
+- `/health` is deliberately excluded from the `API_SECRET` check (kept on a separate unauthenticated router in `api/main.py`) since Railway's health check doesn't send the `x-api-key` header — putting the secret dependency on the whole app would fail Railway's own health probe.
+- The Next.js proxy (`app/api/[...path]/route.ts`) does a straight path/method/body forward, so any new FastAPI endpoint is automatically reachable at the matching `/api/...` path with no proxy changes needed — only `lib/api.ts` needs a new function pointing at `/api/...`.
 
 ## Automation
 
@@ -168,13 +176,15 @@ This requires `api/__init__.py` to exist so `api.main` resolves as a package imp
 
 ## The dashboard (Next.js + FastAPI)
 
-The FastAPI backend wraps the existing `db_tools.py` logic behind REST endpoints:
+The FastAPI backend wraps the existing `db_tools.py` logic behind REST endpoints (all gated by `API_SECRET` except `/health`):
 - `GET /jobs` — search/filter postings (`status`, `min_score`, `company`, `limit`), backed by `search_jobs()`
 - `PATCH /jobs/status` — update a posting's status (`job_id`, `new_status`), backed by `mark_status()`, validated against the same fixed status set used throughout the sheet
 - `GET /metrics` — status counts, backed by `get_status_counts()`
 - `GET /history` — weekly status-history snapshots, backed by `get_status_history_weekly()`
 - `PATCH /jobs/not-interested` — marks a posting "not interested" (sets status, score to 1, and a fixed reason), backed by `mark_not_interested()`
 - `POST /chat` — conversational agent endpoint, backed by `agent.py`'s `ask_agent()` (search_jobs / mark_status tools); `ChatWidget.tsx` sends `message` + `conversation_history` and renders returned text plus any jobs via `JobCard`
+
+All frontend requests go through `lib/api.ts`, which now calls same-origin `/api/...` paths rather than the Railway URL directly; `app/api/[...path]/route.ts` proxies each request to FastAPI and attaches `API_SECRET`, so the secret never reaches client-side JS.
 
 The Next.js frontend renders three main pieces, all sharing a single `lib/statusColors.ts` mapping so colors, labels, and status order can never drift out of sync across components:
 - **Metrics tiles** (`MetricsTiles.tsx`) — one tile per status, full-width row across the top
@@ -198,5 +208,6 @@ The UI uses a pixel-art aesthetic (Press Start 2P for headers/tile numbers/butto
 - [x] **"Not interested" manual filter** — `PATCH /jobs/not-interested` + `mark_not_interested()`, exposed via a button on `JobCard.tsx` (used in both the unapplied list and chat results)
 - [x] **Migrate data layer from Google Sheets to Supabase (Postgres)** — schema created, data migrated via `migrate_to_supabase.py`, `sheet_tools.py` replaced by `db_tools.py` (using `supabase-py`), collector/Slack report/FastAPI/agent all repointed; verified working end-to-end
 - [x] **Deployment** — Next.js on Vercel, FastAPI on Railway; both live and verified end-to-end (metrics/history/jobs load, mark-applied and mark-not-interested persist and reflect immediately, chat agent reachable and its status updates also reflect immediately)
+- [x] **Shared-secret API gating** — `API_SECRET` required on all FastAPI routes except `/health` (`verify_secret` in `api/main.py`); browser no longer calls Railway directly, instead routed through `app/api/[...path]/route.ts`, which attaches the secret server-side; `NEXT_PUBLIC_API_URL` removed in favor of server-only `FASTAPI_URL`
 - [ ] Additional sources (Greenhouse/Lever/Ashby direct pulls, Gmail parsing for LinkedIn/Handshake alerts)
 - [ ] Re-enable SimplifyJobs once it adds 2027 postings
