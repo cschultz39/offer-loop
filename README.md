@@ -1,4 +1,4 @@
-# Job Search Agent
+# OfferLoop - Job Search Agent
 
 An automated pipeline that collects new-grad Software Engineering / Forward Deployed Engineer job postings, filters and scores them against personal preferences using Claude, tracks them in a Supabase (Postgres) database, and provides a Next.js dashboard (backed by a FastAPI service) to browse postings and manage application status — with a daily Slack digest of new postings.
 

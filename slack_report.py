@@ -35,9 +35,9 @@ def get_todays_jobs(client):
 # ------------------- slack ----------------------------
 def format_message(jobs):
     if not jobs:
-        return "No new postings found today."
+        return "The daily loop came up empty!"
 
-    lines = [f"*{len(jobs)} new postings today* :briefcase:\n"]
+    lines = [f"The daily loop found *{len(jobs)} new postings!*\n"]
     for job in jobs:
         score = job.get("relevance_score", "?")
         reason = job.get("relevance_reason", "")
