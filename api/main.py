@@ -1,20 +1,27 @@
 # --------------------------------
 #            imports
 # --------------------------------
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from pydantic import BaseModel
 
 import sys
 import os
+import secrets
 
 # allows main to access sheet_tools while living folder below repo root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db_tools import get_status_counts, search_jobs, mark_status, get_status_history_weekly, mark_not_interested
 from agent import ask_agent
 
-app = FastAPI(title="Job Search Agent API")
+API_SECRET = os.environ["API_SECRET"]
+
+async def verify_secret(x_api_key: str = Header(...)):
+    if not secrets.compare_digest(x_api_key, API_SECRET):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+app = FastAPI(title="Job Search Agent API", dependencies=[Depends(verify_secret)])
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app.add_middleware(
