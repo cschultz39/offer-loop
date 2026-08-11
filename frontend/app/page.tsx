@@ -18,7 +18,7 @@ export default async function Home() {
     <main className="max-w-295 mx-auto px-10 py-8">
       <div>
         <div
-          className="flex items-center justify-between mb-2"
+          className="flex items-center justify-between mb-7"
           style={{
             background: "var(--color-applied)",
             border: "4px solid var(--color-applied-d)",
@@ -27,31 +27,36 @@ export default async function Home() {
           }}
         >
           <div className="flex items-center gap-3">
-            <svg width="28" height="28" viewBox="0 0 28 28" style={{ imageRendering: "pixelated" }}>
-              <rect x="12" y="2" width="5" height="5" fill="#fff" />
-              <rect x="17" y="2" width="5" height="5" fill="#fff" />
-              <rect x="20" y="8" width="5" height="5" fill="#fff" />
-              <rect x="20" y="13" width="5" height="5" fill="#fff" />
-              <rect x="15" y="18" width="5" height="5" fill="#fff" />
-              <rect x="8" y="16" width="5" height="5" fill="#fff" />
-              <rect x="5" y="11" width="5" height="5" fill="#fff" />
-              <rect x="8" y="6" width="5" height="5" fill="#fff" />
-              <rect x="12" y="11" width="5" height="5" fill="#fff" />
+            <svg
+              viewBox="0 0 24 24"
+              width="26"
+              height="26"
+              fill="none"
+              stroke="#fff"
+              strokeWidth="1.75"
+              strokeLinejoin="miter"
+              strokeLinecap="square"
+            >
+              <path d="M4 4H20V20H4V8H16V16H8V12H12" />
             </svg>
             <h1 className="font-pixel font-bold text-2xl" style={{ color: "#fff" }}>
               offer loop
             </h1>
           </div>
-          <span className="font-pixel text-xs" style={{ color: "#fff" }}>
-            {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="font-pixel text-xs" style={{ color: "#fff" }}>
+              search, apply, repeat.
+            </span>
+            <span className="font-pixel text-xs" style={{ color: "#D8E4C8" }}>
+              {(() => {
+                const d = new Date();
+                const mm = String(d.getMonth() + 1).padStart(2, "0");
+                const dd = String(d.getDate()).padStart(2, "0");
+                return `${mm}.${dd}.${d.getFullYear()}`;
+              })()}
+            </span>
+          </div>
         </div>
-        <p
-          className="font-pixel text-xs mb-7"
-          style={{ color: "var(--color-applied-d)" }}
-        >
-          search, apply, repeat.
-        </p>
       </div>
       
       <div>
