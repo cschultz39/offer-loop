@@ -17,18 +17,41 @@ export default async function Home() {
   return (
     <main className="max-w-295 mx-auto px-10 py-8">
       <div>
-      <h1
-          className="font-pixel font-bold text-3xl mb-7 inline-block"
-                  style={{
-                    background: "var(--color-applied)",
-                    color: "#fff",
-                    padding: "10px 18px",
-                    border: "4px solid var(--color-applied-d)",
-                    boxShadow: "4px 4px 0 var(--color-applied-d)",
-                  }}
+        <div
+          className="flex items-center justify-between mb-2"
+          style={{
+            background: "var(--color-applied)",
+            border: "4px solid var(--color-applied-d)",
+            boxShadow: "4px 4px 0 var(--color-applied-d)",
+            padding: "14px 20px",
+          }}
         >
-          stay in the loop!
-        </h1>
+          <div className="flex items-center gap-3">
+            <svg width="28" height="28" viewBox="0 0 28 28" style={{ imageRendering: "pixelated" }}>
+              <rect x="12" y="2" width="5" height="5" fill="#fff" />
+              <rect x="17" y="2" width="5" height="5" fill="#fff" />
+              <rect x="20" y="8" width="5" height="5" fill="#fff" />
+              <rect x="20" y="13" width="5" height="5" fill="#fff" />
+              <rect x="15" y="18" width="5" height="5" fill="#fff" />
+              <rect x="8" y="16" width="5" height="5" fill="#fff" />
+              <rect x="5" y="11" width="5" height="5" fill="#fff" />
+              <rect x="8" y="6" width="5" height="5" fill="#fff" />
+              <rect x="12" y="11" width="5" height="5" fill="#fff" />
+            </svg>
+            <h1 className="font-pixel font-bold text-2xl" style={{ color: "#fff" }}>
+              offer loop
+            </h1>
+          </div>
+          <span className="font-pixel text-xs" style={{ color: "#fff" }}>
+            {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          </span>
+        </div>
+        <p
+          className="font-pixel text-xs mb-7"
+          style={{ color: "var(--color-applied-d)" }}
+        >
+          search, apply, repeat.
+        </p>
       </div>
       
       <div>
