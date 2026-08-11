@@ -6,18 +6,30 @@ load_dotenv()
 from anthropic import Anthropic
 from db_tools import search_jobs, mark_status
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+CENTRAL_TZ = ZoneInfo("America/Chicago")
+
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 TOOLS = [
     {
         "name": "search_jobs",
-        "description": "Search saved job postings, optionally filtered by application status, minimum relevance score, or company name. Returns results sorted by relevance score, highest first.",
+        "description": "Search saved job postings, optionally filtered by status, minimum relevance score, company, location, source, title, or date ranges for when the job was posted or scraped. Returns results sorted by relevance score, highest first.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "status": {"type": "string", "description": "Filter by status, e.g. 'not applied', 'applied', 'interviewing'"},
                 "min_score": {"type": "integer", "description": "Minimum relevance score, 1-10"},
                 "company": {"type": "string", "description": "Filter by company name (partial match)"},
+                "location": {"type": "string", "description": "Filter by location (partial match), e.g. 'Chicago', 'Remote'"},
+                "source": {"type": "string", "description": "Filter by the source list the posting came from, e.g. 'speedyapply', 'newgrad2027'"},
+                "title": {"type": "string", "description": "Filter by job title (partial match), e.g. 'FDE', 'Software Engineer'"},
+                "date_posted_after": {"type": "string", "description": "Only jobs posted on or after this date, format YYYY-MM-DD"},
+                "date_posted_before": {"type": "string", "description": "Only jobs posted on or before this date, format YYYY-MM-DD"},
+                "date_scraped_after": {"type": "string", "description": "Only jobs scraped on or after this date, format YYYY-MM-DD"},
+                "date_scraped_before": {"type": "string", "description": "Only jobs scraped on or before this date, format YYYY-MM-DD"},
                 "limit": {"type": "integer", "description": "Max number of results to return, default 10"},
             },
         },
@@ -48,12 +60,15 @@ def run_tool(name, tool_input):
         return mark_status(**tool_input)
     return {"error": f"unknown tool: {name}"}
 
-SYSTEM_PROMPT = """You are a job search assistant helping the user browse and manage saved job postings.
+def build_system_prompt():
+    today = datetime.now(CENTRAL_TZ).strftime("%A, %B %d, %Y")
+    return f"""You are a job search assistant helping the user browse and manage saved job postings.
+
+Today's date is {today}. Use this to resolve relative date references in the user's questions (e.g. "posted this week," "scraped in the last 3 days," "posted since Monday") into actual date_posted_after/date_posted_before or date_scraped_after/date_scraped_before values, formatted as YYYY-MM-DD, when calling search_jobs.
 
 When your answer involves specific job postings, don't list out their details (company, title, score, link, status) in your text response — those are rendered separately as cards below your message. Just write a short, natural sentence introducing or summarizing what you found (e.g. "Here are your top matches:" or "Found 3 unapplied jobs at Chicago-based companies:"), and let the cards speak for the specifics.
 
 Only fall back to describing individual job details in text if the user asks a question that isn't well answered by a card list — e.g. comparing two jobs, or asking about a field the cards don't show."""
-
 
 def ask_agent(user_message, conversation_history=None):
     if conversation_history is None:
@@ -66,7 +81,7 @@ def ask_agent(user_message, conversation_history=None):
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
+        system=build_system_prompt(),
         tools=TOOLS,
         messages=messages,
     )
@@ -92,7 +107,7 @@ def ask_agent(user_message, conversation_history=None):
         response = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
-            system=SYSTEM_PROMPT,
+            system=build_system_prompt(),
             tools=TOOLS,
             messages=messages,
         )

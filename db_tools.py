@@ -20,7 +20,9 @@ def get_client():
         _client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
     return _client
 
-def search_jobs(status=None, min_score=None, company=None, limit=10):
+def search_jobs(status=None, min_score=None, company=None, location=None, source=None, title=None,
+                 date_posted_after=None, date_posted_before=None,
+                 date_scraped_after=None, date_scraped_before=None, limit=10):
     query = get_client().table("job_postings").select("*")
     if status is not None:
         query = query.ilike("status", status)
@@ -28,6 +30,20 @@ def search_jobs(status=None, min_score=None, company=None, limit=10):
         query = query.gte("relevance_score", min_score)
     if company is not None:
         query = query.ilike("company", f"%{company}%")
+    if location is not None:
+        query = query.ilike("location", f"%{location}%")
+    if source is not None:
+        query = query.ilike("source", f"%{source}%")
+    if title is not None:
+        query = query.ilike("title", f"%{title}%")
+    if date_posted_after is not None:
+        query = query.gte("date_posted", date_posted_after)
+    if date_posted_before is not None:
+        query = query.lte("date_posted", date_posted_before)
+    if date_scraped_after is not None:
+        query = query.gte("date_scraped", date_scraped_after)
+    if date_scraped_before is not None:
+        query = query.lte("date_scraped", date_scraped_before)
     result = query.order("relevance_score", desc=True).limit(limit).execute()
     return result.data
 

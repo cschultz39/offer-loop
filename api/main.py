@@ -43,8 +43,32 @@ def get_metrics():
     return get_status_counts()
 
 @app.get("/jobs")
-def get_jobs(status: Optional[str] = None, min_score: Optional[int] = None, company: Optional[str] = None, limit: int = 10):
-    return search_jobs(status=status, min_score=min_score, company=company, limit=limit)
+def get_jobs(
+    status: Optional[str] = None,
+    min_score: Optional[int] = None,
+    company: Optional[str] = None,
+    location: Optional[str] = None,
+    source: Optional[str] = None,
+    title: Optional[str] = None,
+    date_posted_after: Optional[str] = None,
+    date_posted_before: Optional[str] = None,
+    date_scraped_after: Optional[str] = None,
+    date_scraped_before: Optional[str] = None,
+    limit: int = 10,
+):
+    return search_jobs(
+        status=status,
+        min_score=min_score,
+        company=company,
+        location=location,
+        source=source,
+        title=title,
+        date_posted_after=date_posted_after,
+        date_posted_before=date_posted_before,
+        date_scraped_after=date_scraped_after,
+        date_scraped_before=date_scraped_before,
+        limit=limit,
+    )
 
 class StatusUpdate(BaseModel):
     job_id: str
