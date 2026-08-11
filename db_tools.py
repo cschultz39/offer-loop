@@ -7,7 +7,7 @@ load_dotenv()
 from supabase import create_client, Client
 
 STATUS_OPTIONS = [
-    "not applied", "applied", "oa", "behavioral interview", "technical interview", "offer", "rejected", "withdrawn", "not interested",
+    "not applied", "applied", "oa", "behavioral interview", "technical interview", "offer", "rejected", "withdrawn", "not interested", "closed",
 ]
 
 CENTRAL_TZ = ZoneInfo("America/Chicago")
@@ -134,6 +134,33 @@ def mark_not_interested(job_id):
             "job_id": job_id,
             "old_status": old_status,
             "new_status": "not interested",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as e:
+        print(f"Warning: status update succeeded but history logging failed: {e}")
+
+    return {"success": True}
+
+def mark_closed(job_id, detected_status):
+    """detected_status is 'dead' or 'closed', as returned by posting_status() —
+    recorded in relevance_reason so it's visible without a new column."""
+    client = get_client()
+    existing = client.table("job_postings").select("status").eq("id", job_id).execute()
+    if not existing.data:
+        return {"success": False, "error": "job_id not found"}
+
+    old_status = existing.data[0]["status"]
+    client.table("job_postings").update({
+        "status": "closed",
+        "relevance_score": 1,
+        "relevance_reason": f"posting no longer available ({detected_status}, detected on recheck)",
+    }).eq("id", job_id).execute()
+
+    try:
+        client.table("status_history").insert({
+            "job_id": job_id,
+            "old_status": old_status,
+            "new_status": "closed",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }).execute()
     except Exception as e:
