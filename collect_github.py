@@ -148,9 +148,19 @@ def canonicalize_link(url):
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
 
 def get_existing_ids(client):
-    result = client.table("job_postings").select("id, link").execute()
-    ids = {row["id"] for row in result.data}
-    canonical_links = {canonicalize_link(row["link"]) for row in result.data if row.get("link")}
+    ids = set()
+    canonical_links = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        batch = client.table("job_postings").select("id, link").range(offset, offset + page_size - 1).execute().data
+        for row in batch:
+            ids.add(row["id"])
+            if row.get("link"):
+                canonical_links.add(canonicalize_link(row["link"]))
+        if len(batch) < page_size:
+            break
+        offset += page_size
     return ids, canonical_links
 
 def add_new_jobs(client, jobs, existing_ids, existing_canonical_links, fetcher):
