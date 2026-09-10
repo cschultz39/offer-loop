@@ -151,17 +151,18 @@ npm run dev                   # launch the Next.js dashboard
 ## Deployment
 
 - **Frontend**: Next.js on Vercel. Root Directory `frontend`; `FASTAPI_URL` (server-only) points at Railway, `API_SECRET` is attached to every proxied request. The browser only ever calls same-origin `/api/...` routes.
-- **Backend**: FastAPI on Railway. Root Directory is the **repo root** (not `api/`), since `api/main.py` imports `db_tools.py` from the parent directory and `requirements.txt` lives at repo root. Every route except `/health` requires an `x-api-key: API_SECRET` header (`verify_secret` in `api/main.py`) — single-user auth, not multi-tenant. Start command is set explicitly (Railpack doesn't reliably auto-detect FastAPI or read `Procfile`):
+- **Backend**: FastAPI on Render. Root Directory is the **repo root** (not `api/`), since `api/main.py` imports `db_tools.py` from the parent directory and `requirements.txt` lives at repo root. Start command is set explicitly:
 ```
 uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ```
-Requires `api/__init__.py` so `api.main` resolves as a package import.
+Requires `api/__init__.py` so `api.main` resolves as a package import. Render's free tier spins down after ~15 min idle, so the first request after inactivity has a short cold-start delay.
+- **Auth**: every route except `/health` requires an `x-api-key: API_SECRET` header (single-user auth, not multi-tenant). `verify_secret` must be applied via an `APIRouter(dependencies=[Depends(verify_secret)])` included into `app`, not passed directly to `FastAPI(dependencies=...)` — the latter applies it globally and breaks the unauthenticated `/health` check.
 - **GitHub Actions** (`daily.yml`) runs independently — talks directly to Supabase and Slack, unaffected by frontend/backend deploys.
 
 ### Known gotchas
 - Next.js App Router caches `fetch()` GET requests by default; `lib/api.ts`'s data-fetching functions use `{ cache: "no-store" }` so `router.refresh()` pulls fresh data after any status-changing action.
 - CORS origin matching is exact-string — a trailing slash mismatch between `FRONTEND_URL` and the browser's `Origin` header fails preflight.
-- `/health` is excluded from the `API_SECRET` check (separate unauthenticated router), since Railway's health probe doesn't send `x-api-key`.
+- `/health` is excluded from the `API_SECRET` check (stays on `app` directly, not the authenticated router), since hosting platform health probes don't send `x-api-key`.
 - The Next.js proxy does a straight path/method/body forward, so any new FastAPI endpoint is reachable at the matching `/api/...` path with no proxy changes — only `lib/api.ts` needs a new function.
 
 ## Automation
