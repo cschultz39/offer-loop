@@ -56,7 +56,16 @@ def get_status_counts():
     return counts
 
 def get_status_history_weekly():
-    events = get_client().table("status_history").select("*").order("timestamp").execute().data
+    client = get_client()
+    events = []
+    page_size = 1000
+    offset = 0
+    while True:
+        batch = client.table("status_history").select("*").order("timestamp").range(offset, offset + page_size - 1).execute().data
+        events.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
 
     if not events:
         return []

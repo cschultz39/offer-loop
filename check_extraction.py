@@ -18,6 +18,14 @@ CLOSED_PATTERNS = [
     "job is no longer available",
     "position is closed",
 ]
+CHALLENGE_PATTERNS = [
+    "checking your browser",
+    "just a moment",
+    "cf-browser-verification",
+    "enable javascript and cookies",
+    "verify you are human",
+    "attention required! | cloudflare",
+]
 
 # 403/429/503 usually mean bot-detection kicked in, not that the posting is
 # actually gone. Bucket these separately so they don't get conflated with
@@ -36,8 +44,11 @@ DEFAULT_HEADERS = {
 }
 
 def get_all_jobs():
-    result = get_client().table("job_postings").select("id, company, link").execute()
+    result = get_client().table("job_postings").select("id, company, link, source").execute()
     return result.data
+
+def is_workday(url):
+    return "myworkdayjobs.com" in url or "wd1.myworkdayjobs.com" in url or "workday" in url.lower()
 
 def fetch_and_extract(url, timeout=10):
     """Fetches a URL and extracts visible text, stripped of script/nav/footer noise.
@@ -55,7 +66,8 @@ def fetch_and_extract(url, timeout=10):
 
 def classify_extraction(status_code, text):
     """Buckets an extraction as 'good', 'thin' (likely needs JS), 'closed',
-    'blocked' (bot-detection, not actually dead), or 'dead'."""
+    'blocked' (bot-detection, not actually dead), 'challenge' (Cloudflare
+    interstitial served as a 200), or 'dead'."""
     if status_code is None:
         return "dead"
     if status_code in BLOCKED_STATUS_CODES:
@@ -64,6 +76,8 @@ def classify_extraction(status_code, text):
         return "dead"
 
     lowered = text.lower()
+    if any(pattern in lowered for pattern in CHALLENGE_PATTERNS):
+        return "challenge"
     if any(pattern in lowered for pattern in CLOSED_PATTERNS):
         return "closed"
 
@@ -77,12 +91,17 @@ def run_diagnostic():
     print(f"Checking extraction on {len(jobs)} postings...")
 
     cache = {}
-    results = {"good": 0, "thin": 0, "closed": 0, "blocked": 0, "dead": 0}
+    results = {"good": 0, "thin": 0, "closed": 0, "blocked": 0, "challenge": 0, "dead": 0}
+    by_source = {}
 
     for i, job in enumerate(jobs, 1):
         status_code, text = fetch_and_extract(job["link"])
         bucket = classify_extraction(status_code, text)
         results[bucket] += 1
+
+        source_key = "workday" if is_workday(job["link"]) else job.get("source", "unknown")
+        by_source.setdefault(source_key, {"good": 0, "thin": 0, "closed": 0, "blocked": 0, "challenge": 0, "dead": 0})
+        by_source[source_key][bucket] += 1
 
         cache[job["id"]] = {
             "company": job["company"],
@@ -101,11 +120,20 @@ def run_diagnostic():
     with open(CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2)
 
-    print("\nResults:")
+    print("\nOverall results:")
     total = len(jobs)
     for bucket, count in results.items():
         pct = (count / total * 100) if total else 0
         print(f"  {bucket}: {count} ({pct:.1f}%)")
+
+    print("\nBy source:")
+    for source, counts in by_source.items():
+        source_total = sum(counts.values())
+        print(f"  {source} ({source_total} postings):")
+        for bucket, count in counts.items():
+            if count:
+                pct = (count / source_total * 100) if source_total else 0
+                print(f"    {bucket}: {count} ({pct:.1f}%)")
 
     print(f"\nCached extraction details to {CACHE_PATH}")
 
