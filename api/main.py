@@ -1,7 +1,7 @@
 # --------------------------------
 #            imports
 # --------------------------------
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from pydantic import BaseModel
@@ -21,7 +21,8 @@ async def verify_secret(x_api_key: str = Header(...)):
     if not secrets.compare_digest(x_api_key, API_SECRET):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-app = FastAPI(title="Job Search Agent API", dependencies=[Depends(verify_secret)])
+app = FastAPI(title="Job Search Agent API")
+router = APIRouter(dependencies=[Depends(verify_secret)])
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app.add_middleware(
@@ -38,11 +39,11 @@ app.add_middleware(
 def health_check():
     return {"status": "ok"}
 
-@app.get("/metrics")
+@router.get("/metrics")
 def get_metrics():
     return get_status_counts()
 
-@app.get("/jobs")
+@router.get("/jobs")
 def get_jobs(
     status: Optional[str] = None,
     min_score: Optional[int] = None,
@@ -73,7 +74,7 @@ def get_jobs(
 class StatusUpdate(BaseModel):
     job_id: str
     new_status: str
-@app.patch("/jobs/status")
+@router.patch("/jobs/status")
 def update_job_status(update: StatusUpdate):
     result = mark_status(update.job_id, update.new_status)
     if not result.get("success"):
@@ -82,21 +83,22 @@ def update_job_status(update: StatusUpdate):
 
 class NotInterestedRequest(BaseModel):
     job_id: str
-@app.patch("/jobs/not-interested")
+@router.patch("/jobs/not-interested")
 def update_not_interested(request: NotInterestedRequest):
     result = mark_not_interested(request.job_id)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error"))
     return result
 
-@app.get("/history")
+@router.get("/history")
 def get_history():
     return get_status_history_weekly()
 
 class ChatRequest(BaseModel):
     message: str
     conversation_history: list = []
-@app.post("/chat")
+@router.post("/chat")
 def chat(request: ChatRequest):
     return ask_agent(request.message, request.conversation_history)
 
+app.include_router(router)
